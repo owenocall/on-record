@@ -81,7 +81,8 @@ async function main() {
             return;
           }
           totals.notes++;
-          console.log(`  NOTE ${c.company}: ${outcome.note.ai_use}\n       "${outcome.note.evidence_quote}"\n       ${outcome.note.source_url}`);
+          const listedAs = outcome.note.company === c.company ? "" : ` (listed as ${c.company})`;
+          console.log(`  NOTE ${outcome.note.company}${listedAs}: ${outcome.note.ai_use}\n       "${outcome.note.evidence_quote}"\n       ${outcome.note.source_url}`);
           if (!dryRun) await insertNote(outcome.note);
         } else if (outcome.kind === "quote_mismatch") {
           totals.mismatches++;
