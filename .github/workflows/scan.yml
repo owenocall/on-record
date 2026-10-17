@@ -1,0 +1,40 @@
+name: Daily scan
+
+on:
+  schedule:
+    # 06:30 UTC: after SEC publishes the previous day's index, before UK markets open.
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Date to scan (YYYY-MM-DD). Defaults to yesterday."
+        required: false
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: scanner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scanner/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Scan
+        run: npm run scan -- ${SCAN_DATE:+--date "$SCAN_DATE"}
+        env:
+          SCAN_DATE: ${{ inputs.date }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SEC_CONTACT_EMAIL: ${{ secrets.SEC_CONTACT_EMAIL }}

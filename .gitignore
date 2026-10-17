@@ -1,0 +1,9 @@
+node_modules/
+.next/
+out/
+.vercel/
+
+# Secrets: .env.local and GitHub secrets only
+.env
+.env.local
+.env.*.local
