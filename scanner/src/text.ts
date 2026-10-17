@@ -66,6 +66,32 @@ export function aiPassages(text: string, maxChars = 30_000, context = 2): string
   return out.join("\n");
 }
 
+const BULLET = /^[•·▪●◦\-–]\s*/;
+
+/**
+ * A whole sentence: starts like a sentence and ends with closing punctuation.
+ * A bullet point counts without a full stop, since bullets often lack one.
+ */
+export function isCompleteSentence(quote: string): boolean {
+  const q = normalize(quote);
+  if (q.length < 20) return false;
+  if (BULLET.test(q)) return /^\p{Lu}|^\p{N}/u.test(q.replace(BULLET, ""));
+  const startsWell = /^["“‘'(]?[\p{Lu}\p{N}]/u.test(q);
+  const endsWell = /[.!?…]["”’')\]]*$/.test(q);
+  return startsWell && endsWell;
+}
+
+const COMPANY_SUFFIX = /\b(plc|p\.l\.c\.|inc|incorporated|corp|corporation|co|company|ltd|limited|group|holdings?|sa|se|ag|nv|oyj|llc|the)\b\.?/g;
+
+/** "Dunelm Group" and "Dunelm Group plc" are the same company. */
+export function sameCompanyName(a: string, b: string): boolean {
+  const key = (s: string) =>
+    normalize(s).toLowerCase().replace(/[&,.()'’]/g, " ").replace(COMPANY_SUFFIX, " ").replace(/\s+/g, " ").trim();
+  const ka = key(a);
+  const kb = key(b);
+  return ka.length > 0 && (ka === kb || ka.startsWith(`${kb} `) || kb.startsWith(`${ka} `));
+}
+
 export function containsQuote(source: string, quote: string): boolean {
   const q = normalize(quote);
   return q.length > 0 && normalize(source).includes(q);
