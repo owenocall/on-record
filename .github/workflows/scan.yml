@@ -9,6 +9,10 @@ on:
       date:
         description: "Date to scan (YYYY-MM-DD). Defaults to yesterday."
         required: false
+      dry_run:
+        description: "Dry run: rescan everything and print notes without writing to Supabase."
+        type: boolean
+        default: false
 
 concurrency:
   group: scan
@@ -31,9 +35,10 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - name: Scan
-        run: npm run scan -- ${SCAN_DATE:+--date "$SCAN_DATE"}
+        run: npm run scan -- ${SCAN_DATE:+--date "$SCAN_DATE"} $([ "$DRY_RUN" = true ] && echo --dry-run)
         env:
           SCAN_DATE: ${{ inputs.date }}
+          DRY_RUN: ${{ inputs.dry_run }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

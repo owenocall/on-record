@@ -2,8 +2,9 @@
 //   npm run scan -- [--date YYYY-MM-DD] [--source sec|rns] [--dry-run] [--limit N]
 // --date defaults to yesterday (UTC). --dry-run prints notes and skips the database.
 import { parseArgs } from "node:util";
+import Anthropic from "@anthropic-ai/sdk";
 import { classify, type Outcome } from "./classify.ts";
-import { alreadyScanned, insertNote, markScanned } from "./db.ts";
+import { alreadyScanned, hasNoteFor, insertNote, markScanned } from "./db.ts";
 import { rns } from "./sources/rns.ts";
 import { sec } from "./sources/sec.ts";
 import type { Candidate, Source } from "./sources/types.ts";
@@ -25,6 +26,15 @@ async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): P
   );
 }
 
+/** Errors that will fail every document, so the run should stop at once. */
+function isFatal(err: unknown): boolean {
+  return (
+    err instanceof Anthropic.AuthenticationError ||
+    err instanceof Anthropic.PermissionDeniedError ||
+    (err instanceof Anthropic.BadRequestError && /credit balance/i.test(err.message))
+  );
+}
+
 async function scanCandidate(source: Source, c: Candidate): Promise<Outcome> {
   return classify(c, await source.fetchDocuments(c));
 }
@@ -43,7 +53,9 @@ async function main() {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`Bad --date ${date}`);
 
   const sources = SOURCES.filter((s) => !values.source || s.name.toLowerCase().startsWith(values.source));
-  const totals = { notes: 0, noAi: 0, mismatches: 0, errors: 0 };
+  const totals = { notes: 0, duplicates: 0, noAi: 0, mismatches: 0, errors: 0 };
+  // One note per company per day, even when it files several documents.
+  const notedToday = new Set<string>();
 
   for (const source of sources) {
     let candidates = await source.listCandidates(date);
@@ -58,17 +70,31 @@ async function main() {
       try {
         const outcome = await scanCandidate(source, c);
         if (outcome.kind === "note") {
+          const key = `${outcome.note.company.toLowerCase()}|${outcome.note.announced_on}`;
+          // Claim the key before any await so concurrent workers can't both insert.
+          const duplicate = notedToday.has(key);
+          notedToday.add(key);
+          if (duplicate || (!dryRun && (await hasNoteFor(outcome.note.company, outcome.note.announced_on)))) {
+            totals.duplicates++;
+            console.log(`  DUPLICATE ${outcome.note.company} already has a note for ${outcome.note.announced_on}: ${c.url}`);
+            if (!dryRun) await markScanned(c.url, "note");
+            return;
+          }
           totals.notes++;
           console.log(`  NOTE ${c.company}: ${outcome.note.ai_use}\n       "${outcome.note.evidence_quote}"\n       ${outcome.note.source_url}`);
           if (!dryRun) await insertNote(outcome.note);
         } else if (outcome.kind === "quote_mismatch") {
           totals.mismatches++;
-          console.warn(`  QUOTE NOT FOUND ${c.company} ${c.url}: "${outcome.quote}"`);
+          console.warn(`  QUOTE REJECTED ${c.company} ${c.url}: "${outcome.quote}"`);
         } else {
           totals.noAi++;
         }
         if (!dryRun) await markScanned(c.url, outcome.kind);
       } catch (err) {
+        if (isFatal(err)) {
+          console.error(`FATAL: ${err instanceof Error ? err.message : err}`);
+          process.exit(1);
+        }
         // Not marked as scanned, so the next run retries it.
         totals.errors++;
         console.error(`  ERROR ${c.company} ${c.url}: ${err instanceof Error ? err.message : err}`);
@@ -77,7 +103,7 @@ async function main() {
   }
 
   console.log(
-    `Done: ${totals.notes} notes, ${totals.noAi} without concrete AI use, ` +
+    `Done: ${totals.notes} notes, ${totals.duplicates} same-day duplicates, ${totals.noAi} without concrete AI use, ` +
       `${totals.mismatches} quote mismatches, ${totals.errors} errors`,
   );
   // A few fetch errors are normal; fail the run only if nothing worked.

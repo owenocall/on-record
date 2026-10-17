@@ -53,6 +53,19 @@ export async function markScanned(url: string, outcome: string): Promise<void> {
   if (error) throw error;
 }
 
+/** True if this company already has a note (any status) for this date. */
+export async function hasNoteFor(company: string, announcedOn: string): Promise<boolean> {
+  // ilike without wildcards is a case-insensitive equals; escape any in the name.
+  const pattern = company.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+  const { count, error } = await db()
+    .from("notes")
+    .select("id", { count: "exact", head: true })
+    .ilike("company", pattern)
+    .eq("announced_on", announcedOn);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
 /** Inserts as 'pending'. A source_url that already exists is left untouched. */
 export async function insertNote(note: Note): Promise<void> {
   const { error } = await db()
