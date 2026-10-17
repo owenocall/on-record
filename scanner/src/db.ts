@@ -10,14 +10,36 @@ function db(): SupabaseClient {
   return client;
 }
 
+// The URLs travel in the request's query string, which PostgREST caps at
+// about 16KB, so batch by encoded length rather than by count.
+const MAX_BATCH_CHARS = 6_000;
+
+function batchesByLength(urls: string[]): string[][] {
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  let size = 0;
+  for (const url of urls) {
+    const len = encodeURIComponent(url).length + 3;
+    if (batch.length > 0 && size + len > MAX_BATCH_CHARS) {
+      batches.push(batch);
+      batch = [];
+      size = 0;
+    }
+    batch.push(url);
+    size += len;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
 /** URLs from `urls` the scanner has already processed. */
 export async function alreadyScanned(urls: string[]): Promise<Set<string>> {
   const seen = new Set<string>();
-  for (let i = 0; i < urls.length; i += 200) {
+  for (const batch of batchesByLength(urls)) {
     const { data, error } = await db()
       .from("scanned_sources")
       .select("source_url")
-      .in("source_url", urls.slice(i, i + 200));
+      .in("source_url", batch);
     if (error) throw error;
     for (const row of data) seen.add(row.source_url);
   }
